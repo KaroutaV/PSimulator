@@ -1,5 +1,3 @@
-import org.w3c.dom.ls.LSOutput;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -120,7 +118,7 @@ public class Network {
         for(Packet packet : packetList){
             for(EndDevice endDevice : endDeviceList){
                 if(packet.getEndDeviceID() == endDevice.getId()){
-                    endDevice.setPacketToSent(packet);
+                    endDevice.setPacketToSend(packet);
                     break;
                 }
             }
@@ -155,7 +153,7 @@ public class Network {
         }
         latenciesList.add(sink.getLatency());
         for(EndDevice ed : endDeviceList){
-            ed.setPacketToSent(null);
+            ed.setPacketToSend(null);
         }
     }
     public LoraSettings initializeLoraSettings(){
@@ -196,5 +194,110 @@ public class Network {
         }
         System.out.println("Mean data latency : " + (sum / currentCycle) + " ms.");
         System.out.println("----------------------------------------------------------");
+    }
+
+    public void runLBT(int ipi) {
+        //configure Network
+        Channel channel = new Channel(initializeLoraSettings().getTpreamble());
+
+        for(int i=0;i<numberOfEndDevices;i++){
+            endDeviceList.add(new EndDevice((i + 1), initializeLoraSettings(),channel,clock));
+        }
+        this.clusterHead = new ClusterHead(1,initializeLoraSettings(),endDeviceList);
+        this.sink = new Sink(1, initializeLoraSettings(), clusterHead);
+        for(EndDevice endDevice:endDeviceList){
+            endDevice.setSink(sink);
+        }
+
+        eventList.generatePacketsWithFixedInterval(totalPacketsRequired,numberOfEndDevices,cycleDuration,ipi);
+        eventList.addSequenceNumber();
+
+
+        List<Packet> packets = new ArrayList<>();
+
+        /* checks the packets. Ιf the time the packet was created is
+        less than the end of the cycle then puts the packets in another list to be sent
+        from the eds to the sink otherwise it starts the process of collecting them from the sink
+        and calculates the new cycle */
+        //takes the first packet from the queue
+        Packet packet = eventList.pullPacketFromEventList();
+        List<Packet> listOfPackets = new ArrayList<>();
+        while(!eventList.isEmpty()){
+            if (packet.getGeneratedTime()<=endOfCycle){
+                listOfPackets.add(packet);
+                packet = eventList.pullPacketFromEventList();
+                if(eventList.isEmpty()){
+                    if(packet.getGeneratedTime()<=endOfCycle) {
+                        listOfPackets.add(packet);
+                        lbtSimulation(listOfPackets);
+
+                        listOfPackets.clear();
+                    }else{
+                        /* it enters this loop when the last packet it gets out of the queue
+                         does not belong to the current cycle but to the next one.
+                         Τhen activate the collection for the previous cycle and then
+                         calculate the new cycle and perform the last data collection */
+
+                        lbtSimulation(listOfPackets);
+
+                        listOfPackets.clear();
+
+                        listOfPackets.add(packet);
+
+                        lbtSimulation(listOfPackets);
+
+                        listOfPackets.clear();
+                    }
+                }
+            }else{
+                lbtSimulation(listOfPackets);
+                listOfPackets.clear();
+            }
+        }
+        System.out.println(" total packets " + totalPacketsRequired);
+        int totalPacketsLost= 0 ;
+        for(EndDevice ed:endDeviceList){
+            totalPacketsLost += ed.getLostPackets();
+        }
+        System.out.println("total packets lost " + totalPacketsLost);
+
+
+    }
+    public void lbtSimulation(List<Packet> packetList){
+        currentCycle ++;
+        startOfCycle = endOfCycle;
+        endOfCycle = startOfCycle + cycleDuration;
+        clock = startOfCycle;
+        System.out.println("----------------------- Cycle "+ currentCycle + " -------------------------------");
+        System.out.println("Cycle " + currentCycle + " starts at " + startOfCycle + " ends at " + endOfCycle);
+
+        for(Packet packet : packetList){
+            for(EndDevice endDevice : endDeviceList){
+                if(packet.getEndDeviceID() == endDevice.getId()){
+                    endDevice.setPacketToSend(packet);
+                    endDevice.setClock(clock);
+                    break;
+                }
+            }
+        }
+
+        Thread[] nodes = new Thread[numberOfEndDevices];
+
+        for (int i = 0; i < numberOfEndDevices; i++) {
+            nodes[i] = new Thread(endDeviceList.get(i)); // Δημιουργία νήματος για τον κόμβο
+            nodes[i].start(); // Εκκίνηση νήματος κόμβου
+        }
+
+        //περιμένουμε όλα τα νήματα να τελειώσουν
+        for (Thread node : nodes) {
+            try {
+                node.join(); // Περιμένουμε το τέλος του νήματος
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+
+
     }
 }

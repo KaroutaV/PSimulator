@@ -18,7 +18,8 @@ public class ClusterHead extends Node{
     public void calculateEnergyConsumptions(int numberOfEds){
         //in listenning mode until it receives the command
         setMode(1);
-        int timeInListMode = loraSettings.calculateTimeOnAir(2,1);
+        //int timeInListMode = loraSettings.calculateTimeOnAir(2,1);
+        int timeInListMode = 17;
         addEnergyConsumption(calculateEnergyConsumptions(timeInListMode,super.mode));
 
         //in transmitting mode
@@ -37,6 +38,7 @@ public class ClusterHead extends Node{
         calculateEnergyConsumptions(1);
         for(EndDevice endDevice : endDeviceList){
             if(endDevice.getId()==endDeviceID){
+                System.out.println("Cluster head sends a wake up beacon to end device with id " + endDeviceID);
                 endDevice.receiveUnicastBeacon();
             }
         }

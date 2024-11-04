@@ -25,8 +25,9 @@ public class Sink extends Node{
 
     public void calculateEnergyConsumptions(int numberOfEds){
         super.setMode(2); // transmitting mode
-        int timeOnAir = loraSettings.calculateTimeOnAir(2,1);
-        System.out.println("beacon air time " + timeOnAir);
+        //int timeOnAir = loraSettings.calculateTimeOnAir(2,1);
+        //System.out.println("beacon air time " + timeOnAir);
+        int timeOnAir = 17;
         addEnergyConsumption(calculateEnergyConsumptions(timeOnAir,mode));
         setClock(timeOnAir);
 
@@ -60,6 +61,8 @@ public class Sink extends Node{
     public void sendUnicastCommand(long endDeviceID){
         beaconType = BeaconType.UNICAST;
         calculateEnergyConsumptions(1);
+        System.out.println();
+        System.out.println("Sink sends a command beacon to end device with id " + endDeviceID);
         clusterHead.receiveUnicastCommand(endDeviceID);
     }
     public int getLatency(){ return latency;}

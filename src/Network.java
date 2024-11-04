@@ -271,11 +271,14 @@ public class Network {
         System.out.println("----------------------- Cycle "+ currentCycle + " -------------------------------");
         System.out.println("Cycle " + currentCycle + " starts at " + startOfCycle + " ends at " + endOfCycle);
 
+        for(EndDevice endDevice : endDeviceList){
+            endDevice.setClock(clock);
+        }
+
         for(Packet packet : packetList){
             for(EndDevice endDevice : endDeviceList){
                 if(packet.getEndDeviceID() == endDevice.getId()){
                     endDevice.setPacketToSend(packet);
-                    endDevice.setClock(clock);
                     break;
                 }
             }

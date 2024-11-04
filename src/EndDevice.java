@@ -2,7 +2,7 @@ import java.util.Random;
 
 public class EndDevice extends Node implements Runnable{
 
-    private static int internalClock;
+    private int internalClock;
 
     private Packet packetToSend ;
     private Sink sink;
@@ -72,15 +72,20 @@ public class EndDevice extends Node implements Runnable{
     @Override
     public void run() {
 
+        int currentClock = clock;
         internalClock = clock ;
 
+        //tyxaia kathusterisi gia na mhn ksekinane ola ta nhmata mazi
+        Random random = new Random();
+        int r = random.nextInt(700);
+
         try {
-            Thread.sleep(1000*getId());
+            Thread.sleep(r);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
+        internalClock += r;
 
-        int currentClock = clock ;
 
         if (packetToSend == null) {
             System.out.println("Node " + super.getId() + " has no packet to send, stopping.");
@@ -89,34 +94,48 @@ public class EndDevice extends Node implements Runnable{
 
         // Αρχίστε να στέλνετε πακέτα
         while (packetToSend != null) {
-            internalClock = internalClock + loraSettings.switchToCAD();
-            channel.cca(internalClock);
-            if (channel.isFree()) {
-                channel.occupy(); // Καταλαμβάνει το κανάλι
-                System.out.println("Node " + super.getId() + " sending packet " + packetToSend.getEndDeviceID());
-                try {
-                    System.out.println(super.getId() + " exw to kanali se xrono " + internalClock);
-                    Thread.sleep(loraSettings.getTpreamble()); // Χρόνος preamble
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                internalClock = internalClock + loraSettings.getTpreamble();
-                // Προσομοίωση μετάδοσης
-                try {
-                    Thread.sleep(getTimeOnAir() - loraSettings.getTpreamble()); // Χρόνος μετάδοσης
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                internalClock = internalClock + getTimeOnAir() - loraSettings.getTpreamble();
-                System.out.println("Node " + super.getId() + " finished sending packet " + packetToSend.getEndDeviceID());
-                System.out.println(packetToSend);
+            internalClock += loraSettings.switchToCAD(); // prosthetei to xrono poy apaitei kathe nhma gia na mpei se cad mode
+            //System.out.println("ïnternal clock to nhma prospathei na mpei se xrono " + internalClock);
 
-                channel.release(); // Απελευθερώνει το κανάλι
-                this.packetToSend = null;
-                break; // Τέλος αποστολής για αυτό το πακέτο
+            channel.incrementClock( r + loraSettings.switchToCAD());
+
+            if (channel.cadCheck(getTimeOnAir())) {
+
+                if (channel.isFree()) {
+                    channel.occupy(); // Καταλαμβάνει το κανάλι
+                    System.out.println("Node " + super.getId() + " sending packet " + packetToSend.getEndDeviceID());
+                    try {
+                        System.out.println(super.getId() + " exw to kanali se xrono " + internalClock);
+                        Thread.sleep(loraSettings.getTpreamble()); // Χρόνος preamble
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    internalClock = internalClock + loraSettings.getTpreamble();
+                    channel.incrementClock(loraSettings.getTpreamble());
+                    // Προσομοίωση μετάδοσης
+                    try {
+                        Thread.sleep(getTimeOnAir() - loraSettings.getTpreamble()); // Χρόνος μετάδοσης
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    internalClock = internalClock + getTimeOnAir() - loraSettings.getTpreamble();
+                    channel.incrementClock(getTimeOnAir()-loraSettings.getTpreamble());
+                    System.out.println("Node " + super.getId() + " finished sending packet " + packetToSend.getEndDeviceID());
+                    System.out.println(packetToSend);
+
+                    channel.release(); // Απελευθερώνει το κανάλι
+                    this.packetToSend = null;
+                    break; // Τέλος αποστολής για αυτό το πακέτο
+                } else {
+                    System.out.println("Collision detected for node " + getId());
+                    lostPackets++;
+                    packetToSend = null; // Πακέτο χάθηκε λόγω σύγκρουσης
+                    // Ενημέρωση μετρητή χαμένων πακέτων
+                }
             } else {
                 // Το κανάλι είναι κατειλημμένο
                 System.out.println("Node " + super.getId() + " waiting to send packet " + packetToSend.getEndDeviceID());
+                System.out.println("internal clock tou node " + internalClock);
                 int backoff = this.backoff.nextInt(2000) ;
                 //System.out.println("backoff " + backoff);
                 try {
@@ -134,54 +153,7 @@ public class EndDevice extends Node implements Runnable{
             }
         }
     }
-//    @Override
-//    public void run() {
-//        // Αναμονή για την καθυστέρηση πριν την αποστολή
-//        try {
-//            Thread.sleep(1000 * getId());
-//        } catch (InterruptedException e) {
-//            e.printStackTrace();
-//        }
-//
-//        // Έλεγχος αν το πακέτο είναι null πριν ξεκινήσει η αποστολή
-//        if (packetToSend == null) {
-//            System.out.println("Node " + getId() + " has no packet to send, stopping.");
-//            return; // Τερματισμός νήματος
-//        }
-//
-//        // Αρχίστε να στέλνετε πακέτα
-//        while (packetToSend != null) {
-//            if (channel.cca()) { // Έλεγχος καναλιού
-//                channel.occupy(); // Προσπάθεια κατάληψης του καναλιού
-//                // Έλεγχος για πιθανή σύγκρουση
-//                if (!channel.isFree()) {
-//                    System.out.println("Collision detected! Node " + getId() + " failed to send packet " + packetToSend.getEndDeviceID());
-//                    channel.release(); // Απελευθερώνει το κανάλι λόγω αποτυχίας
-//                    break; // Διακοπή αποστολής λόγω σύγκρουσης
-//                }
-//
-//                System.out.println("Node " + getId() + " sending packet " + packetToSend.getEndDeviceID());
-//                // Προσομοίωση μετάδοσης
-//                try {
-//                    Thread.sleep(getTimeOnAir()); // Χρόνος μετάδοσης
-//                } catch (InterruptedException e) {
-//                    e.printStackTrace();
-//                }
-//
-//                System.out.println("Node " + getId() + " finished sending packet " + packetToSend.getEndDeviceID());
-//                channel.release(); // Απελευθερώνει το κανάλι
-//                break; // Τέλος αποστολής για αυτό το πακέτο
-//            } else {
-//                // Το κανάλι είναι κατειλημμένο
-//                System.out.println("Node " + getId() + " waiting to send packet " + packetToSend.getEndDeviceID());
-//                try {
-//                    Thread.sleep(backoff.nextInt(2000)); // Τυχαία αναμονή {0,2s}
-//                } catch (InterruptedException e) {
-//                    e.printStackTrace();
-//                }
-//            }
-//        }
-//    }
     public int getLostPackets(){ return lostPackets; }
+    public int getInternalClock(){ return internalClock ; }
 
 }

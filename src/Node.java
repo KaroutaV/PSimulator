@@ -5,6 +5,8 @@ public abstract class Node implements EnergyConsumption{
     protected double energyConsumption;
     protected LoraSettings loraSettings;
     protected final int GUARDTIME = 6;
+
+    //wubArrivalTime is the exact time when the end device was triggered by the cluster head
     protected int wubArrivalTime = 17; // ms
 
     //modes:
@@ -20,6 +22,7 @@ public abstract class Node implements EnergyConsumption{
         this.mode = SLEEP_MODE; // initial mode
         this.clock = 0;
         this.energyConsumption = 0;
+        loraSettings.calculateTimeOnAir();
     }
 
     public long getId() {

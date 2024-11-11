@@ -107,6 +107,51 @@ public class EventList {
         }
     }
 
+    public void generatePacketsWithFixedInterval(int totalPackets, int numberOfNodes, int cycleDuration, int interPacketInterval) {
+        int packetCount = 0;
+        long currentTime = 0; // Τρέχων χρόνος της προσομοίωσης
+        Map<Integer, Long> lastPacketTime = new HashMap<>(); // Χρόνος τελευταίου πακέτου για κάθε κόμβο
+
+        // Αρχικοποίηση τελευταίου χρόνου δημιουργίας για κάθε κόμβο
+        for (int i = 1; i <= numberOfNodes; i++) {
+            lastPacketTime.put(i, 0L); // Αρχικά, δεν έχει δημιουργηθεί κανένα πακέτο
+        }
+
+
+        // Δημιουργία τυχαίων πακέτων από τους κόμβους
+        for (int nodeId = 1; nodeId <= numberOfNodes && packetCount < totalPackets; nodeId++) {
+            // Δημιουργία τυχαίου χρόνου εντός του τρέχοντος κύκλου
+            long randomTime = currentTime + (long) (Math.random() * 500 /* cycleDuration * 2*/ );
+            Packet packet = new Packet(nodeId, randomTime);
+            lastPacketTime.put(nodeId,randomTime);
+            eventQueue.add(packet);
+            packetCount++;
+        }
+
+        // Προχωράμε στον χρόνο του επόμενου κύκλου
+        currentTime += cycleDuration;
+
+
+        // Συνεχίζουμε την παραγωγή πακέτων με βάση το IPI
+        while (packetCount < totalPackets) {
+            for (int nodeId = 1; nodeId <= numberOfNodes && packetCount < totalPackets; nodeId++) {
+                long lastTime = lastPacketTime.get(nodeId);
+                currentTime = lastTime + interPacketInterval;
+                // Δημιουργία πακέτου
+                Packet packet = new Packet(nodeId, currentTime);
+                eventQueue.add(packet);
+                packetCount++;
+                // Ενημέρωση του χρόνου τελευταίου πακέτου
+                lastPacketTime.put(nodeId, currentTime);
+            }
+
+            // Αυξάνουμε τον τρέχοντα χρόνο (μπορείς να προσαρμόσεις αυτή τη λογική)
+            currentTime += cycleDuration; // ή μπορείς να χρησιμοποιήσεις μικρότερο βήμα, π.χ. 100 ms
+        }
+    }
+
+
+
 
     // print all the packets from the event list
     public void printEventList() {

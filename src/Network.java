@@ -1,4 +1,3 @@
-import org.w3c.dom.ls.LSOutput;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +23,11 @@ public class Network {
     private List<Integer> latenciesList;
     private int totalPackets;
 
+
+    private List<Double> sinkEnergy ;
+    private List<Double> clusterHeadEnergy ;
+    private List<Double> endDeviceEnergy;
+
     public Network(int spreadingFactor, String codingRate, double dataRate, int numberOfEndDevices,
                    int totalPacketsRequired, int cycleDuration, BeaconType beaconType) {
         this.spreadingFactor = spreadingFactor;
@@ -42,6 +46,10 @@ public class Network {
         this.endOfCycle = cycleDuration;
         this.endDeviceList = new ArrayList<>();
         totalPackets = 0 ;
+
+        this.sinkEnergy = new ArrayList<>();
+        this.clusterHeadEnergy = new ArrayList<>();
+        this.endDeviceEnergy = new ArrayList<>();
     }
 
     public void runSimulation(){
@@ -58,61 +66,54 @@ public class Network {
         }
 
         //creating an event list
-        this.eventList.generatePacketsWithPoissonDistribution(cycleDuration);
+        //this.eventList.generatePacketsWithPoissonDistribution(cycleDuration);
+        this.eventList.generatePacketsWithFixedInterval(totalPacketsRequired,numberOfEndDevices,cycleDuration,10000);
         this.eventList.addSequenceNumber();
 
-        //the sink lets the end devices collect data in cycle 0 and starts the data collection process from cycle 1
+        //the sink lets the end devices collect data in cycle 0 and starts the data collection process from
+        // cycle 1
         this.clock = cycleDuration;
 
-        List<Packet> packets = new ArrayList<>();
+        List<Packet> listOfPackets = new ArrayList<>();
+        processPackets(eventList,listOfPackets);
 
-        /* checks the packets. Ιf the time the packet was created is
+        displayOverallResults();
+
+    }
+
+    /* checks the packets. Ιf the time the packet was created is
         less than the end of the cycle then puts the packets in another list to be sent
         from the eds to the sink otherwise it starts the process of collecting them from the sink
-        and calculates the new cycle */
-        //takes the first packet from the queue
-        Packet packet = eventList.pullPacketFromEventList();
-        List<Packet> listOfPackets = new ArrayList<>();
-        while(!eventList.isEmpty()){
-            if (packet.getGeneratedTime()<=endOfCycle){
-                //eventList1.addPacketToEventList(packet);
+        and calculates the new cycle
+    */
+    public void processPackets(EventList eventList, List<Packet> listOfPackets ) {
+        while (!eventList.isEmpty()) {
+            Packet packet = eventList.pullPacketFromEventList();
+
+            if (packet.getGeneratedTime() <= endOfCycle) {
                 listOfPackets.add(packet);
-                packet = eventList.pullPacketFromEventList();
-                if(eventList.isEmpty()){
-                    if(packet.getGeneratedTime()<=endOfCycle) {
-                        //eventList1.addPacketToEventList(packet);
-                        listOfPackets.add(packet);
-                        dataCollection(listOfPackets);
-                        listOfPackets.clear();
-                    }else{
-                        /* it enters this loop when the last packet it gets out of the queue
-                         does not belong to the current cycle but to the next one.
-                         Τhen activate the collection for the previous cycle and then
-                         calculate the new cycle and perform the last data collection */
+            } else {
+                // Current packet is outside the current cycle
+                dataCollection(listOfPackets); // Collect data for current cycle
+                listOfPackets.clear(); // Reset for new cycle
 
-                        dataCollection(listOfPackets);
-                        listOfPackets.clear();
+                endOfCycle = calculateNewCycleEnd(); // Update end of cycle
+                listOfPackets.add(packet); // Start new cycle with the current packet
+            }
 
-                        //eventList1.addPacketToEventList(packet);
-                        listOfPackets.add(packet);
-
-                        dataCollection(listOfPackets);
-                        listOfPackets.clear();
-                    }
-                }
-            }else{
+            // Final data collection if queue is empty
+            if (eventList.isEmpty()) {
                 dataCollection(listOfPackets);
-                listOfPackets.clear();
             }
         }
-
-        results();
-
+    }
+    public int calculateNewCycleEnd(){
+        return this.endOfCycle = startOfCycle + cycleDuration;
     }
     public void dataCollection(List<Packet> packetList){
         currentCycle ++;
         startOfCycle = endOfCycle;
-        endOfCycle = startOfCycle + cycleDuration;
+        endOfCycle = calculateNewCycleEnd();
         clock = endOfCycle;
         System.out.println("----------------------- Cycle "+ currentCycle + " -------------------------------");
         System.out.println("Cycle " + currentCycle + " starts at " + startOfCycle + " ends at " + endOfCycle);
@@ -120,7 +121,7 @@ public class Network {
         for(Packet packet : packetList){
             for(EndDevice endDevice : endDeviceList){
                 if(packet.getEndDeviceID() == endDevice.getId()){
-                    endDevice.setPacketToSent(packet);
+                    endDevice.setPacketToSend(packet);
                     break;
                 }
             }
@@ -144,7 +145,7 @@ public class Network {
             this.clock = clock + sink.getClock();
         }
 
-        printResults();
+        printCycleReport();
 
         if(beaconType==BeaconType.UNICAST){
             sink.resetEnergyConsumption();
@@ -153,9 +154,10 @@ public class Network {
                 ed.resetEnergyConsumption();
             }
         }
+
         latenciesList.add(sink.getLatency());
         for(EndDevice ed : endDeviceList){
-            ed.setPacketToSent(null);
+            ed.setPacketToSend(null);
         }
     }
     public LoraSettings initializeLoraSettings(){
@@ -163,26 +165,30 @@ public class Network {
         loraSettings.setSpreadingFactor(spreadingFactor);
         loraSettings.setCodingRate(codingRate);
         loraSettings.setDataRate(dataRate);
+        loraSettings.calculateTimeOnAir();
         return loraSettings;
     }
-    public void printResults(){
+    public void printCycleReport(){
         System.out.println("---------------------Cycle" + currentCycle + "-------------------------------------");
         System.out.println("I received the packets at time " + clock);
         System.out.println("total packets received in cycle " + currentCycle + " are " + sink.getTotalPacketsReceived());
         totalPackets = totalPackets + sink.getTotalPacketsReceived();
         sink.setTotalPacketsReceived(0);
         System.out.println("Sink Energy consumptions = " + sink.getEnergyConsumption() + " mJ.");
-        System.out.println("cluster head consumptions " + clusterHead.getEnergyConsumption() + " mJ.");
+        sinkEnergy.add(sink.getEnergyConsumption());
+        System.out.println("Cluster Head consumptions " + clusterHead.getEnergyConsumption() + " mJ.");
+        clusterHeadEnergy.add(clusterHead.getEnergyConsumption());
         double totalEnergyEds = 0;
         for(EndDevice endDevice: endDeviceList){
             totalEnergyEds = totalEnergyEds + endDevice.getEnergyConsumption();
         }
+        endDeviceEnergy.add(totalEnergyEds);
         System.out.println("End devices energy consumptions " + totalEnergyEds);
         System.out.println("cycle " + currentCycle + " latency : " + sink.getLatency() + " ms.");
         System.out.println("----------------------------------------------------------");
     }
 
-    public void results(){
+    public void displayOverallResults(){
         System.out.println();
         System.out.println();
         System.out.println("------------------------Results---------------------------");
@@ -195,6 +201,140 @@ public class Network {
             sum = sum + latency;
         }
         System.out.println("Mean data latency : " + (sum / currentCycle) + " ms.");
+
+        double meanSinkEnergyCons = 0 ;
+        double meanClusterHeadEnergyCons = 0 ;
+        double meanEndDeviceEnergyCons = 0 ;
+        for(int i=0; i< sinkEnergy.size() ; i++){
+            meanSinkEnergyCons += sinkEnergy.get(i);
+            meanClusterHeadEnergyCons += clusterHeadEnergy.get(i);
+            meanEndDeviceEnergyCons += endDeviceEnergy.get(i);
+        }
+        meanSinkEnergyCons = meanSinkEnergyCons / sinkEnergy.size();
+        meanClusterHeadEnergyCons = meanClusterHeadEnergyCons / clusterHeadEnergy.size();
+        meanEndDeviceEnergyCons = meanEndDeviceEnergyCons / endDeviceEnergy.size();
+
+        System.out.println("Sink Energy consumptions = " + meanSinkEnergyCons + " mJ.");
+        System.out.println("Cluster Head Energy consumptions = " + meanClusterHeadEnergyCons + " mJ.");
+        System.out.println("End Device Energy consumptions = " + meanEndDeviceEnergyCons + " mJ.");
+
         System.out.println("----------------------------------------------------------");
+    }
+
+    public void runLBT(int ipi) {
+        //configure Network
+        Channel channel = new Channel(initializeLoraSettings().getTpreamble());
+
+        for(int i=0;i<numberOfEndDevices;i++){
+            endDeviceList.add(new EndDevice((i + 1), initializeLoraSettings(),channel,clock));
+        }
+        this.clusterHead = new ClusterHead(1,initializeLoraSettings(),endDeviceList);
+        this.sink = new Sink(1, initializeLoraSettings(), clusterHead);
+        for(EndDevice endDevice:endDeviceList){
+            endDevice.setSink(sink);
+        }
+
+        eventList.generatePacketsWithFixedInterval(totalPacketsRequired,numberOfEndDevices,cycleDuration,ipi);
+        eventList.addSequenceNumber();
+
+
+        List<Packet> packets = new ArrayList<>();
+
+        /* checks the packets. Ιf the time the packet was created is
+        less than the end of the cycle then puts the packets in another list to be sent
+        from the eds to the sink otherwise it starts the process of collecting them from the sink
+        and calculates the new cycle */
+        //takes the first packet from the queue
+        Packet packet = eventList.pullPacketFromEventList();
+        List<Packet> listOfPackets = new ArrayList<>();
+        while(!eventList.isEmpty()){
+            if (packet.getGeneratedTime()<=endOfCycle){
+                listOfPackets.add(packet);
+                packet = eventList.pullPacketFromEventList();
+                if(eventList.isEmpty()){
+                    if(packet.getGeneratedTime()<=endOfCycle) {
+                        listOfPackets.add(packet);
+                        lbtSimulation(listOfPackets);
+
+                        listOfPackets.clear();
+                    }else{
+                        /* it enters this loop when the last packet it gets out of the queue
+                         does not belong to the current cycle but to the next one.
+                         Τhen activate the collection for the previous cycle and then
+                         calculate the new cycle and perform the last data collection */
+
+                        lbtSimulation(listOfPackets);
+
+                        listOfPackets.clear();
+
+                        listOfPackets.add(packet);
+
+                        lbtSimulation(listOfPackets);
+
+                        listOfPackets.clear();
+                    }
+                }
+            }else{
+                lbtSimulation(listOfPackets);
+                listOfPackets.clear();
+            }
+        }
+        resultsLBT();
+    }
+    public void resultsLBT(){
+        double reliability = (double) (totalPacketsRequired - Channel.lostPackets) / totalPacketsRequired;
+        System.out.println(" Reliability = " + reliability);
+        double meanDataLatency = 0.0;
+        for(Integer latency : latenciesList){
+            meanDataLatency += latency;
+        }
+        meanDataLatency = meanDataLatency / latenciesList.size();
+        System.out.println("Mean Data Latency (ms) " + meanDataLatency);
+
+    }
+    public void lbtSimulation(List<Packet> packetList){
+        System.out.println("----------------------- Cycle "+ currentCycle + " -------------------------------");
+        System.out.println("Cycle " + currentCycle + " starts at " + startOfCycle + " ends at " + endOfCycle);
+
+        for(EndDevice endDevice : endDeviceList){
+            endDevice.setClock(clock);
+        }
+
+        for(Packet packet : packetList){
+            for(EndDevice endDevice : endDeviceList){
+                if(packet.getEndDeviceID() == endDevice.getId()){
+                    endDevice.setPacketToSend(packet);
+                    break;
+                }
+            }
+        }
+
+        Channel channel = endDeviceList.get(0).getChannel();
+
+        // bazw ta endDevices na ksekinan thn metadwsh toys se tyxaio xrono an exoun paketo na metadwsoun
+
+        for(EndDevice endDevice : endDeviceList){
+            endDevice.generateRandomTimeToSent();
+        }
+
+        channel.startSimulation();
+
+        //ypologismos latency
+        int totalLatency = 0;
+        for(EndDevice endDevice: endDeviceList){
+            totalLatency += endDevice.getLatency();
+            //System.out.println(endDevice.getLatency());
+        }
+        latenciesList.add(totalLatency);
+        System.out.println("total latency " + totalLatency);
+        for(EndDevice endDevice : endDeviceList){
+            endDevice.setPacketToSend(null);
+            endDevice.setLatency(0);
+        }
+
+        currentCycle ++;
+        startOfCycle = endOfCycle;
+        endOfCycle = startOfCycle + cycleDuration;
+        clock = startOfCycle;
     }
 }

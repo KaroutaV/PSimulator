@@ -1,14 +1,13 @@
 import java.util.Random;
 
-public class EndDevice extends Node implements Runnable{
+public class EndDevice extends Node implements Comparable<EndDevice> {
 
     private int internalClock;
-
     private Packet packetToSend ;
     private Sink sink;
     private Channel channel;
-    private Random backoff;
     private int lostPackets;
+    private int latency ;
 
     public EndDevice(long endDeviceID, LoraSettings loraSettings){
         super(endDeviceID,loraSettings);
@@ -16,17 +15,17 @@ public class EndDevice extends Node implements Runnable{
     public EndDevice(long endDeviceID, LoraSettings loraSettings,Channel channel, int clock){
         super(endDeviceID,loraSettings);
         this.channel=channel;
-        this.backoff = new Random();
         setClock(clock);
         lostPackets = 0 ;
+        latency = 0 ;
     }
     public void setSink(Sink sink){ this.sink = sink; }
 
     public void receivePacket(int numOfNodes){
-        // calculation of the timeslot to start transmitting
-        int timeslot = (int) (wubArrivalTime + (getTimeOnAir() + GUARDTIME) * super.getId());
+        // compute the start of its time slot
+        int timeslot = (int) (wubArrivalTime + (getTimeOnAir() + GUARDTIME) * (super.getId() - 1 ));
+        //System.out.println("timeslot start " + timeslot + " for end device " + this.getId());
         sendPacket(timeslot);
-
         calculateEnergyConsumption(numOfNodes);
     }
 
@@ -53,107 +52,61 @@ public class EndDevice extends Node implements Runnable{
 
 
         //transmiting mode
-        //if(packetToSent!=null){
+        if(packetToSend!=null){
             setMode(2);
-            addEnergyConsumption(calculateEnergyConsumptions(getTimeOnAir(),mode));
-        //}
+            addEnergyConsumption(calculateEnergyConsumptions(super.getTimeOnAir(),mode));
+        }
     }
 
     public void receiveUnicastBeacon(){
-        // calculation of the timeslot to start transmitting
-        int timeslot = (int) (wubArrivalTime + (getTimeOnAir() + GUARDTIME));
+        // starts the transmission directly
+        int timeslot = wubArrivalTime;
         sendPacket(timeslot);
 
         calculateEnergyConsumption(1);
     }
     public Packet getPacketToSend() { return packetToSend; }
     public void setPacketToSend(Packet packetToSend) { this.packetToSend = packetToSend; }
+    public int getLostPackets(){ return lostPackets; }
+    public Integer getInternalClock(){ return internalClock ; }
 
-    @Override
-    public void run() {
+    public void generateRandomTimeToSent() {
+        //den bazw sthn oura nodes ta opoia den exoun na metadosoyn paketa
+        if(packetToSend != null){
+//            //tyxaia kathusterisi gia na mhn ksekinane ola ta nhmata mazi
+//            internalClock = clock;
+//            Random random = new Random();
+//            int r = random.nextInt(2000);
+//
+//            internalClock += r;
+            //prosteto to ed sto queue tou channel
 
-        int currentClock = clock;
-        internalClock = clock ;
-
-        //tyxaia kathusterisi gia na mhn ksekinane ola ta nhmata mazi
-        Random random = new Random();
-        int r = random.nextInt(700);
-
-        try {
-            Thread.sleep(r);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-        internalClock += r;
-
-
-        if (packetToSend == null) {
-            System.out.println("Node " + super.getId() + " has no packet to send, stopping.");
-            return; // Τερματισμός νήματος
-        }
-
-        // Αρχίστε να στέλνετε πακέτα
-        while (packetToSend != null) {
-            internalClock += loraSettings.switchToCAD(); // prosthetei to xrono poy apaitei kathe nhma gia na mpei se cad mode
-            //System.out.println("ïnternal clock to nhma prospathei na mpei se xrono " + internalClock);
-
-            channel.incrementClock( r + loraSettings.switchToCAD());
-
-            if (channel.cadCheck(getTimeOnAir())) {
-
-                if (channel.isFree()) {
-                    channel.occupy(); // Καταλαμβάνει το κανάλι
-                    System.out.println("Node " + super.getId() + " sending packet " + packetToSend.getEndDeviceID());
-                    try {
-                        System.out.println(super.getId() + " exw to kanali se xrono " + internalClock);
-                        Thread.sleep(loraSettings.getTpreamble()); // Χρόνος preamble
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                    internalClock = internalClock + loraSettings.getTpreamble();
-                    channel.incrementClock(loraSettings.getTpreamble());
-                    // Προσομοίωση μετάδοσης
-                    try {
-                        Thread.sleep(getTimeOnAir() - loraSettings.getTpreamble()); // Χρόνος μετάδοσης
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                    internalClock = internalClock + getTimeOnAir() - loraSettings.getTpreamble();
-                    channel.incrementClock(getTimeOnAir()-loraSettings.getTpreamble());
-                    System.out.println("Node " + super.getId() + " finished sending packet " + packetToSend.getEndDeviceID());
-                    System.out.println(packetToSend);
-
-                    channel.release(); // Απελευθερώνει το κανάλι
-                    this.packetToSend = null;
-                    break; // Τέλος αποστολής για αυτό το πακέτο
-                } else {
-                    System.out.println("Collision detected for node " + getId());
-                    lostPackets++;
-                    packetToSend = null; // Πακέτο χάθηκε λόγω σύγκρουσης
-                    // Ενημέρωση μετρητή χαμένων πακέτων
-                }
-            } else {
-                // Το κανάλι είναι κατειλημμένο
-                System.out.println("Node " + super.getId() + " waiting to send packet " + packetToSend.getEndDeviceID());
-                System.out.println("internal clock tou node " + internalClock);
-                int backoff = this.backoff.nextInt(2000) ;
-                //System.out.println("backoff " + backoff);
-                try {
-                    Thread.sleep(backoff); // Τυχαία αναμονή {0,2}s
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-
-            if(internalClock > currentClock + 10000){
-                System.out.println("packet lost");
-                packetToSend = null;
-                lostPackets ++;
-                return;
-            }
+            // to bazw na kseikina molis kanei sensing
+           internalClock = clock;
+           internalClock += (int) getPacketToSend().getGeneratedTime();
+           channel.addEndDevice(this);
+        }else{
+            System.out.println("node with id " + getId() + " has not packet to send.");
         }
     }
-    public int getLostPackets(){ return lostPackets; }
-    public int getInternalClock(){ return internalClock ; }
+    @Override
+    public int compareTo(EndDevice other) {
+        return Integer.compare(this.internalClock, other.internalClock); // Σύγκριση με βάση το internalClock
+    }
+    public Channel getChannel(){ return channel; }
+    public void setInternalClock(int internalClock){this.internalClock = internalClock;}
+
+    public int getLatency() {
+        return latency;
+    }
+
+    public void setLatency(int latency) {
+        this.latency = latency;
+    }
+    public void addLatency(int latency) {
+        this.latency += latency;
+    }
+    public double getCADduration() { return loraSettings.cadDuration();}
+
 
 }

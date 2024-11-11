@@ -1,72 +1,117 @@
+import java.sql.SQLOutput;
+import java.util.HashMap;
+import java.util.PriorityQueue;
+import java.util.Random;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class Channel {
-
-    private final ReentrantLock lock = new ReentrantLock();
-
-
-    private AtomicBoolean isOccupied = new AtomicBoolean(false);
-    private int occupiedClockTimestamp; // Εικονικός χρόνος όταν καταλήφθηκε το κανάλι
-    private int clock; // Global εικονικός χρόνος
-    private int tPreamble;
-    private PriorityBlockingQueue<EndDevice> waitingQueue; // Λίστα αναμονής για τους κόμβους
-
-    public Channel(int tPreamble) {
-        this.clock = 0; // Αρχική τιμή του εικονικού χρόνου
-        this.tPreamble = tPreamble;
-        this.waitingQueue = new PriorityBlockingQueue<>((a, b) -> Integer.compare(a.getInternalClock(), b.getInternalClock()));
-
+    private PriorityQueue<EndDevice> priorityQueue;
+    private int tPreample;
+    private boolean isOccupied ;
+    private int occupiedClockTimestamp;
+    private int clock;
+    private Random backoff;
+    public static int lostPackets = 0;
+    public Channel(int tPreamble){
+        this.tPreample = tPreamble;
+        priorityQueue = new PriorityQueue<>();
+        this.isOccupied = false;
+        backoff = new Random();
     }
 
-    // Αύξηση του global clock, την καλείς σε κάθε βήμα της προσομοίωσης
-//    public void incrementClock(int timeStep) {
-//        clock += timeStep;
-//    }
-    public void incrementClock(int timeStep) {
-        lock.lock(); // Κλείδωμα
-        try {
-            clock += timeStep;
-        } finally {
-            lock.unlock(); // Ξεκλείδωμα
+    public void addEndDevice(EndDevice endDevice){
+        priorityQueue.add(endDevice);
+    }
+    public void startSimulation(){
+        while (!priorityQueue.isEmpty()) {
+            EndDevice endDevice = priorityQueue.poll(); // pairnei to proto kombo apo thn oura
+
+            clock = (int) Math.ceil(endDevice.getCADduration());
+//            System.out.println("cad duration : " + clock);
+
+            if (isFree()) { //an to kanali eleuthero
+                occupy(); //katelabe to
+                this.occupiedClockTimestamp = clock + endDevice.getInternalClock();
+                clock = occupiedClockTimestamp;
+
+                if(priorityQueue.peek() !=null) {
+                    sendPreambleOfPacket(endDevice); // edw stelnei to preamble kai mexri na teleiwsei an ksekinisei na stelnei kapoios kombos kanei pisw xrono backoff
+                    // otan bgei apo ayth th sunarthsh tha eimai se xrono tpreamble kai den exei staleii akoma to paketo
+                    sendWholePacket(endDevice);
+                }else{
+                    clock = endDevice.getInternalClock() + endDevice.getTimeOnAir();
+                    endDevice.addLatency(clock - occupiedClockTimestamp);
+                    System.out.println(endDevice.getPacketToSend());
+                    this.isOccupied = false;
+                }
+            }
+        }
+
+    }
+    //kalytero onoma
+    public void sendPreambleOfPacket(EndDevice endDevice){
+        while(clock < priorityQueue.peek().getInternalClock() && clock < occupiedClockTimestamp + tPreample ){
+            this.clock ++;
+        }
+        if (clock >= priorityQueue.peek().getInternalClock()){
+            // edw shmainei oti thelei na steilei allos kombos kai briskei katilimeno to kanali
+            EndDevice deviceToUpdate = priorityQueue.poll();
+
+            int cadDuration = (int) Math.ceil(deviceToUpdate.getCADduration());
+            int backoff = 500 ;//this.backoff.nextInt(2000);
+            deviceToUpdate.setInternalClock(deviceToUpdate.getInternalClock()+backoff + cadDuration);
+            deviceToUpdate.addLatency(backoff + cadDuration);
+            priorityQueue.add(deviceToUpdate);
+            System.out.println("node : " + deviceToUpdate.getId() + " -> backoff " + backoff);
+            if(priorityQueue.peek()!=null) {
+                sendPreambleOfPacket(endDevice);
+            }
+        }
+//        else if(clock== occupiedClockTimestamp + tPreample){
+//            System.out.println("to preamble kommati stalthike");
+//        }
+    }
+    public void sendWholePacket(EndDevice endDevice){
+        while (clock < priorityQueue.peek().getInternalClock() && clock < occupiedClockTimestamp + endDevice.getTimeOnAir()){
+            clock ++ ;
+        }
+        if( clock == occupiedClockTimestamp + endDevice.getTimeOnAir()){
+            System.out.println(endDevice.getPacketToSend());
+            endDevice.addLatency(clock - occupiedClockTimestamp);
+            isOccupied = false;
+        }else if(clock >= priorityQueue.peek().getInternalClock()){
+            EndDevice colEndDevice = priorityQueue.poll();
+            int cadDuration = (int) Math.ceil(colEndDevice.getCADduration());
+            colEndDevice.addLatency(cadDuration);
+            System.out.println("the ed starts transmitting at time " + colEndDevice.getInternalClock() +
+                    " but the previous node occupy the channel at time " + clock);
+            System.out.println("collision! lost packet : " + colEndDevice.getPacketToSend() );
+            lostPackets ++;
+            if(priorityQueue.peek()!=null) {
+                sendWholePacket(endDevice);
+            }else{
+                while (clock < occupiedClockTimestamp + endDevice.getTimeOnAir()){
+                    clock ++ ;
+                }
+                endDevice.addLatency(clock - occupiedClockTimestamp);
+                System.out.println(endDevice.getPacketToSend());
+                this.isOccupied = false;
+            }
         }
     }
+    public boolean isFree(){
+        return !isOccupied;
+    }
+    public void occupy(){ this.isOccupied = true; }
 
-    // Καταλαμβάνει το κανάλι και καταγράφει την τρέχουσα χρονική σήμανση του clock
-    public synchronized void occupy() {
-        isOccupied.set(true);
-        occupiedClockTimestamp = clock;
+    public PriorityQueue<EndDevice> getPriorityQueue() {
+        return priorityQueue;
     }
 
-    // Απελευθερώνει το κανάλι
-    public synchronized void release() {
-        isOccupied.set(false);
+    public void setPriorityQueue(PriorityQueue<EndDevice> priorityQueue) {
+        this.priorityQueue = priorityQueue;
     }
-
-    // Ελέγχει αν το κανάλι είναι ελεύθερο
-    public boolean isFree() {
-        return !isOccupied.get();
-    }
-
-    // Υπολογίζει τον χρόνο που πέρασε από τότε που το κανάλι καταλήφθηκε, σε σχέση με το clock
-    public int timeSinceOccupied() {
-        if (isOccupied.get()) {
-            return clock - occupiedClockTimestamp;
-        }
-        return 0; // Αν το κανάλι είναι ελεύθερο, επιστρέφει 0
-    }
-
-    // CAD check: θεωρεί το κανάλι ελεύθερο αν έχει περάσει χρόνος μεγαλύτερος από tPreamble
-    public boolean cadCheck(int timeOnAir) {
-        int timeSinceOccupied = timeSinceOccupied(); // Χρόνος από την τελευταία κατάληψη καναλιού
-        return ((timeSinceOccupied > tPreamble) &&
-                (timeSinceOccupied <  timeOnAir)) || isFree();
-    }
-
-    // Πρόσβαση στον τρέχοντα εικονικό χρόνο (για χρήση από τα nodes)
-    public int getClock() {
-        return clock;
-    }
-
+    public int getClock(){return clock;}
 }

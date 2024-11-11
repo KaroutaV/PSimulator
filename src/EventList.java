@@ -121,7 +121,7 @@ public class EventList {
         // Δημιουργία τυχαίων πακέτων από τους κόμβους
         for (int nodeId = 1; nodeId <= numberOfNodes && packetCount < totalPackets; nodeId++) {
             // Δημιουργία τυχαίου χρόνου εντός του τρέχοντος κύκλου
-            long randomTime = currentTime + (long) (Math.random() * cycleDuration * 2);
+            long randomTime = currentTime + (long) (Math.random() * 500 /* cycleDuration * 2*/ );
             Packet packet = new Packet(nodeId, randomTime);
             lastPacketTime.put(nodeId,randomTime);
             eventQueue.add(packet);

@@ -11,9 +11,10 @@ public class LoraSettings {
                             // and one when no header is present, packetHeader = 0
     private int packetHeader;   //  is the data rate optimizer, one when enabled, zero otherwise
     private int de;
-    private double tSymbol ;
-    private double cadTime;
+    private double tSymbol ;  //duration that is the airtime of a single LoRa chirp
+    private double cadDuration;
     private int tPreamble;
+    private int timeOnAir;
 
 
     public LoraSettings(int bandwidth, int transmissionPower, int preambleLength, int carrierFrequency, int payload) {
@@ -24,14 +25,18 @@ public class LoraSettings {
         this.payload = payload;
         this.packetHeader = 0;
     }
-    public int codingRateToNumeric(){
+
+    /* coding rate can be in range from 1 to 4 */
+    public int getErrorCorrectionBits(){
         return switch (codingRate) {
             case "4/5" -> 1;
             case "4/6" -> 2;
+            case "4/7" -> 3;
+            case "4/8" -> 4;
             default -> throw new IllegalArgumentException("Invalid coding rate: " + codingRate);
         };
     }
-    public int getTimeOnAir(){
+    public void calculateTimeOnAir(){
         if(spreadingFactor>=11){ // or only if sf==12 ???
             this.de =1;
         }else{
@@ -43,22 +48,26 @@ public class LoraSettings {
 
         this.tPreamble = (int) Math.round(tPreamble * 1000);
 
-        double temp = (double) (8 * payload - 4 * spreadingFactor + 28 + 16 * codingRateToNumeric() - 20 * packetHeader) / (4*(spreadingFactor-2*de));
-        temp = Math.ceil(temp)* (codingRateToNumeric()+4);
+        double temp = (double) (8 * payload - 4 * spreadingFactor + 28 + 16 * getErrorCorrectionBits() - 20 * packetHeader) / (4*(spreadingFactor-2*de));
+        temp = Math.ceil(temp)* (getErrorCorrectionBits()+4);
         temp = Math.max(temp,0);
         double tPayload = (8 + temp) * 1 / symbolRate ;
         double timeOnAir = ((tPreamble + tPayload) * 1000);
-        return (int) Math.round(timeOnAir);
+        this.timeOnAir = (int) Math.round(timeOnAir);
     }
+
+    public int getTimeOnAir(){ return this.timeOnAir; }
 
     public int calculateTimeOnAir(int payload, double dataRate){
         int prevPayload = this.payload;
         double prevDataRate = this.dataRate;
         this.payload = payload;
         this.dataRate = dataRate;
-        int toa = getTimeOnAir();
+        calculateTimeOnAir();
+        int toa = this.timeOnAir;
         this.payload = prevPayload;
         this.dataRate = prevDataRate ;
+        calculateTimeOnAir();
         return toa;
     }
 
@@ -78,24 +87,41 @@ public class LoraSettings {
         this.payload = payload;
     }
 
-    /* The CAD (Channel Activity Detection) feature is only useful to detect LoRa preamble symbols. As CAD is not able
+    /*
+    Introduction to Channel Activity Detection (https://www.semtech.com/uploads/technology/LoRa/cad-ensuring-lora-packets.pdf)
+
+    The CAD (Channel Activity Detection) feature is only useful to detect LoRa preamble symbols. As CAD is not able
     to detect all transmissions especially when the preamble has been already sent, this causes packet collisions at
     the receiver, dropping some packets, resulting in lower reliability
+
     //The CAD mode available on all of LoRa radios is primarily designed for energy-efficient preamble detection
+
+    First, a node requires TCADwakeup_seconds to wake up into the reception phase. The TCADwakeup is defined as :
+    TCADwakeup = 32 / BW
+    After that, the node starts to open a receive window. The time consumption for this stage can be calculated by
+    tSymbol = Math.pow(2,spreadingFactor) / BW
+
+    Then, the node processes incoming data to verify if there is any presence of preamble. The processing time or
+    TCADprocessing in seconds is
+    TCADprocessing = Math.pow(2,spreadingFactor) * spreadingFactor / 1750 * Math.pow(10,3)
+
     * */
-    public int switchToCAD(){
+    public double cadDuration(){
         // Tsymbol is the duration that is the airtime of a single LoRa chirp, depending on the SF value.
         this.tSymbol = Math.pow(2,spreadingFactor) / bandwidth;
-
         /*The radio then switches to the CAD mode and performs a CAD operation, which
         lasts [Tsymbol + (32/BW)] milliseconds, during which the radio performs a receive
         operation correlation on the received samples  */
-        this.cadTime = tSymbol + ((double) 32 / bandwidth);
+        this.cadDuration = tSymbol + ((double) 32 / bandwidth);
 
-        return (int) cadTime;
+        double tCADprocessing = (Math.pow(2,spreadingFactor) * spreadingFactor) / (1750 * Math.pow(10,3));
+        this.cadDuration += tCADprocessing;
+
+        return cadDuration;
     }
 
     public int getTpreamble() {
+        int toa = getTimeOnAir();
         return tPreamble;
     }
 }

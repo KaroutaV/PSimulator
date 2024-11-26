@@ -121,7 +121,7 @@ public class LoraSettings {
     }
 
     public int getTpreamble() {
-        int toa = getTimeOnAir();
         return tPreamble;
     }
+    public int getSpreadingFactor(){ return spreadingFactor;}
 }

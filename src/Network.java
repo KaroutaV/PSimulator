@@ -10,7 +10,7 @@ public class Network {
     private int numberOfEndDevices;
     private int totalPacketsRequired;
     private int cycleDuration;
-    private BeaconType beaconType;
+    private CommunicationMode beaconType;
     private EventList eventList;
     private int currentCycle;
     private int startOfCycle;
@@ -23,13 +23,14 @@ public class Network {
     private List<Integer> latenciesList;
     private int totalPackets;
 
-
     private List<Double> sinkEnergy ;
     private List<Double> clusterHeadEnergy ;
     private List<Double> endDeviceEnergy;
+    private List<Double> radioDutyCycle ;
+    private int interPacketInterval;
 
     public Network(int spreadingFactor, String codingRate, double dataRate, int numberOfEndDevices,
-                   int totalPacketsRequired, int cycleDuration, BeaconType beaconType) {
+                   int totalPacketsRequired, int cycleDuration, CommunicationMode beaconType, int interPacketInterval) {
         this.spreadingFactor = spreadingFactor;
         this.codingRate = codingRate;
         this.dataRate = dataRate;
@@ -50,6 +51,9 @@ public class Network {
         this.sinkEnergy = new ArrayList<>();
         this.clusterHeadEnergy = new ArrayList<>();
         this.endDeviceEnergy = new ArrayList<>();
+        this.radioDutyCycle = new ArrayList<>();
+
+        this.interPacketInterval = interPacketInterval;
     }
 
     public void runSimulation(){
@@ -67,7 +71,9 @@ public class Network {
 
         //creating an event list
         //this.eventList.generatePacketsWithPoissonDistribution(cycleDuration);
-        this.eventList.generatePacketsWithFixedInterval(totalPacketsRequired,numberOfEndDevices,cycleDuration,10000);
+//        this.eventList.generatePacketsWithFixedInterval(totalPacketsRequired,numberOfEndDevices,cycleDuration,interPacketInterval);
+        eventList.generatePacketsForAllNodesUntilLimit(cycleDuration);
+
         this.eventList.addSequenceNumber();
 
         //the sink lets the end devices collect data in cycle 0 and starts the data collection process from
@@ -94,7 +100,11 @@ public class Network {
                 listOfPackets.add(packet);
             } else {
                 // Current packet is outside the current cycle
-                dataCollection(listOfPackets); // Collect data for current cycle
+                if(beaconType == CommunicationMode.LBT){
+                    lbtSimulation(listOfPackets);
+                }else{
+                    dataCollection(listOfPackets); // Collect data for current cycle
+                }
                 listOfPackets.clear(); // Reset for new cycle
 
                 endOfCycle = calculateNewCycleEnd(); // Update end of cycle
@@ -103,7 +113,11 @@ public class Network {
 
             // Final data collection if queue is empty
             if (eventList.isEmpty()) {
-                dataCollection(listOfPackets);
+                if(beaconType == CommunicationMode.LBT){
+                    lbtSimulation(listOfPackets);
+                }else{
+                    dataCollection(listOfPackets); // Collect data for current cycle
+                }
             }
         }
     }
@@ -127,27 +141,29 @@ public class Network {
             }
         }
 
-        if (beaconType == BeaconType.BROADCAST) {
+        if (beaconType == CommunicationMode.TDMA) {
             //broadcast
-            sink.sendBroadcastCommand(numberOfEndDevices);
+//            sink.sendBroadcastCommand(numberOfEndDevices);
+            sink.sendWakeUpBeacon(beaconType,0);
             // After this command, the sink will have received all the packets in the cycle.
-        } else if (beaconType == BeaconType.UNICAST) {
+        } else if (beaconType == CommunicationMode.UNICAST) {
             //unicast
-            sink.setLatency(0);
+            //sink.setLatency(0);
             for(EndDevice ed : endDeviceList){
-                sink.sendUnicastCommand(ed.getId());
+                //sink.sendUnicastCommand(ed.getId());
+                sink.sendWakeUpBeacon(beaconType,ed.getId());
                 this.clock = clock + sink.getClock();
                 sink.addLatency(sink.clock);
             }
         }
 
-        if(beaconType == BeaconType.BROADCAST) {
+        if(beaconType == CommunicationMode.TDMA) {
             this.clock = clock + sink.getClock();
         }
 
         printCycleReport();
 
-        if(beaconType==BeaconType.UNICAST){
+        if(beaconType== CommunicationMode.UNICAST){
             sink.resetEnergyConsumption();
             clusterHead.resetEnergyConsumption();
             for(EndDevice ed : endDeviceList){
@@ -185,6 +201,13 @@ public class Network {
         endDeviceEnergy.add(totalEnergyEds);
         System.out.println("End devices energy consumptions " + totalEnergyEds);
         System.out.println("cycle " + currentCycle + " latency : " + sink.getLatency() + " ms.");
+        double meanRDC = 0;
+        for(EndDevice endDevice : endDeviceList){
+            meanRDC += (double) (endDevice.gettReceive() + endDevice.gettTransmit()) / interPacketInterval ;
+        }
+        meanRDC = meanRDC/endDeviceList.size();
+        System.out.println("End Device Radio Duty Cycle (RDC) %" + meanRDC*100);
+        radioDutyCycle.add(meanRDC);
         System.out.println("----------------------------------------------------------");
     }
 
@@ -218,10 +241,17 @@ public class Network {
         System.out.println("Cluster Head Energy consumptions = " + meanClusterHeadEnergyCons + " mJ.");
         System.out.println("End Device Energy consumptions = " + meanEndDeviceEnergyCons + " mJ.");
 
+        double totalRDC = 0;
+        for(Double meanRDC : radioDutyCycle ){
+            totalRDC += meanRDC;
+        }
+        totalRDC = totalRDC / radioDutyCycle.size();
+        System.out.println("End Device Mean Radio Duty Cycle (%) " + totalRDC*100);
+
         System.out.println("----------------------------------------------------------");
     }
 
-    public void runLBT(int ipi) {
+    public void runLBT() {
         //configure Network
         Channel channel = new Channel(initializeLoraSettings().getTpreamble());
 
@@ -234,51 +264,13 @@ public class Network {
             endDevice.setSink(sink);
         }
 
-        eventList.generatePacketsWithFixedInterval(totalPacketsRequired,numberOfEndDevices,cycleDuration,ipi);
+        //this.eventList.generatePacketsWithPoissonDistribution(cycleDuration);
+//        eventList.generatePacketsWithFixedInterval(totalPacketsRequired,numberOfEndDevices,cycleDuration,interPacketInterval);
+        eventList.generatePacketsForAllNodesUntilLimit(cycleDuration);
         eventList.addSequenceNumber();
 
-
-        List<Packet> packets = new ArrayList<>();
-
-        /* checks the packets. Ιf the time the packet was created is
-        less than the end of the cycle then puts the packets in another list to be sent
-        from the eds to the sink otherwise it starts the process of collecting them from the sink
-        and calculates the new cycle */
-        //takes the first packet from the queue
-        Packet packet = eventList.pullPacketFromEventList();
         List<Packet> listOfPackets = new ArrayList<>();
-        while(!eventList.isEmpty()){
-            if (packet.getGeneratedTime()<=endOfCycle){
-                listOfPackets.add(packet);
-                packet = eventList.pullPacketFromEventList();
-                if(eventList.isEmpty()){
-                    if(packet.getGeneratedTime()<=endOfCycle) {
-                        listOfPackets.add(packet);
-                        lbtSimulation(listOfPackets);
-
-                        listOfPackets.clear();
-                    }else{
-                        /* it enters this loop when the last packet it gets out of the queue
-                         does not belong to the current cycle but to the next one.
-                         Τhen activate the collection for the previous cycle and then
-                         calculate the new cycle and perform the last data collection */
-
-                        lbtSimulation(listOfPackets);
-
-                        listOfPackets.clear();
-
-                        listOfPackets.add(packet);
-
-                        lbtSimulation(listOfPackets);
-
-                        listOfPackets.clear();
-                    }
-                }
-            }else{
-                lbtSimulation(listOfPackets);
-                listOfPackets.clear();
-            }
-        }
+        processPackets(eventList,listOfPackets);
         resultsLBT();
     }
     public void resultsLBT(){
@@ -290,10 +282,21 @@ public class Network {
         }
         meanDataLatency = meanDataLatency / latenciesList.size();
         System.out.println("Mean Data Latency (ms) " + meanDataLatency);
+        double totalRDC = 0;
+        for(Double meanRDC : radioDutyCycle ){
+            totalRDC += meanRDC;
+        }
+        totalRDC = totalRDC / radioDutyCycle.size();
+        System.out.println("End Device Mean Radio Duty Cycle (%) " + totalRDC*100);
 
     }
     public void lbtSimulation(List<Packet> packetList){
+
         System.out.println("----------------------- Cycle "+ currentCycle + " -------------------------------");
+
+        endOfCycle = startOfCycle + cycleDuration;
+        clock = startOfCycle;
+
         System.out.println("Cycle " + currentCycle + " starts at " + startOfCycle + " ends at " + endOfCycle);
 
         for(EndDevice endDevice : endDeviceList){
@@ -309,32 +312,48 @@ public class Network {
             }
         }
 
+        sink.sendWakeUpBeacon(beaconType,0);
+
         Channel channel = endDeviceList.get(0).getChannel();
-
-        // bazw ta endDevices na ksekinan thn metadwsh toys se tyxaio xrono an exoun paketo na metadwsoun
-
-        for(EndDevice endDevice : endDeviceList){
-            endDevice.generateRandomTimeToSent();
-        }
-
         channel.startSimulation();
 
-        //ypologismos latency
-        int totalLatency = 0;
+        int latency = 0 ;
         for(EndDevice endDevice: endDeviceList){
-            totalLatency += endDevice.getLatency();
-            //System.out.println(endDevice.getLatency());
+            latency += endDevice.getLatency();
         }
-        latenciesList.add(totalLatency);
-        System.out.println("total latency " + totalLatency);
+
+        //estw 500 ms mexri na steilei o sink mnm na ksekinhsei h syllogi
+        latency += 430;
+//        latency += 16 ;
+        latenciesList.add(latency);
+
+        List<Double> rdcList = new ArrayList<>();
+        double rdc = 0 ;
+        for(EndDevice endDevice: endDeviceList){
+            rdc += (17.0 + endDevice.gettReceive()+ endDevice.gettTransmit())/interPacketInterval;
+        }
+        rdc = rdc / endDeviceList.size();
+        rdcList.add(rdc);
+
+        System.out.println();
+        System.out.println("---------------------------------------------------");
+        System.out.println("cycle " + currentCycle + " latency " + latency);
+        double meanRDC = 0 ;
+        for(Double rdc1 : rdcList){
+            meanRDC += rdc1 ;
+        }
+        meanRDC = meanRDC / rdcList.size();
+        radioDutyCycle.add(meanRDC);
+        System.out.println("mean radio duty cycle " + meanRDC);
+        System.out.println("---------------------------------------------------");
+
         for(EndDevice endDevice : endDeviceList){
             endDevice.setPacketToSend(null);
             endDevice.setLatency(0);
+            endDevice.settReceive(0);
+            endDevice.settTransmit(0);
         }
-
         currentCycle ++;
         startOfCycle = endOfCycle;
-        endOfCycle = startOfCycle + cycleDuration;
-        clock = startOfCycle;
     }
 }

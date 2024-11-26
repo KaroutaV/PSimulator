@@ -24,6 +24,7 @@ public abstract class Node implements EnergyConsumption{
         this.energyConsumption = 0;
         loraSettings.calculateTimeOnAir();
     }
+    public Node(){}
 
     public long getId() {
         return id;

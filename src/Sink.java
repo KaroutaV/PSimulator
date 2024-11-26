@@ -7,20 +7,32 @@ public class Sink extends Node{
     private int numOfEds;
     private int latency;
     private int totalPacketsReceived ;
-    private BeaconType beaconType;
+    private CommunicationMode communicationMode;
 
     public Sink(long sinkID, LoraSettings loraSettings, ClusterHead clusterHead){
         super(sinkID, loraSettings);
         this.clusterHead = clusterHead;
         this.receivedPackets = new ArrayList<>();
     }
-    public void sendBroadcastCommand(int numberOfEds){
-        beaconType = BeaconType.BROADCAST;
-        resetEnergyConsumption();
-        this.numOfEds = numberOfEds;
-        latency = 0 ;
-        calculateEnergyConsumptions(numberOfEds);
-        clusterHead.receiveBroadcastCommand();
+
+    public void sendWakeUpBeacon(CommunicationMode communicationMode, long endDeviceID){
+        this.communicationMode = communicationMode;
+        if(communicationMode == CommunicationMode.TDMA || communicationMode == CommunicationMode.LBT){
+            resetEnergyConsumption();
+            System.out.println("Sink sends a broadcast command beacon to Cluster Head");
+            numOfEds = clusterHead.getNumberOfEds();
+            latency = 0;
+            calculateEnergyConsumptions(numOfEds);
+        }else if(communicationMode == CommunicationMode.UNICAST){
+            if(endDeviceID==1){
+                resetEnergyConsumption();
+                latency = 0 ;
+            }
+            calculateEnergyConsumptions(1);
+            System.out.println();
+            System.out.println("Sink sends a unicast command beacon to Cluster Head for the End Device with ID " + endDeviceID);
+        }
+        clusterHead.receiveWakeUpBeacon(communicationMode,endDeviceID);
     }
 
     public void calculateEnergyConsumptions(int numberOfEds){
@@ -35,10 +47,10 @@ public class Sink extends Node{
         super.setMode(1);
 
         int startListeningMode = clock + timeOnAir + wubArrivalTime;
-        if(beaconType == BeaconType.BROADCAST) {
+        if(communicationMode == CommunicationMode.TDMA) {
             int endOfListeningMode = startListeningMode + (super.getTimeOnAir() + super.GUARDTIME) * numberOfEds;
             addEnergyConsumption(calculateEnergyConsumptions(endOfListeningMode - startListeningMode, mode));
-        }else if (beaconType == BeaconType.UNICAST){
+        }else if (communicationMode == CommunicationMode.UNICAST){
             int endOfListeningMode = startListeningMode + super.getTimeOnAir();
             addEnergyConsumption(calculateEnergyConsumptions(endOfListeningMode - startListeningMode, mode));
         }
@@ -52,25 +64,18 @@ public class Sink extends Node{
             receivedPackets.add(packet);
             totalPacketsReceived ++;
         }
-        if(endDeviceID==numOfEds && beaconType == BeaconType.BROADCAST){
+        if(endDeviceID==numOfEds && communicationMode == CommunicationMode.TDMA){
             totalPacketsReceived = receivedPackets.size();
             int endOFTrans = timeslot + getTimeOnAir() + GUARDTIME ;
             super.addClock(endOFTrans);
             latency = super.getClock();
             receivedPackets.clear();
-        }else if (beaconType == BeaconType.UNICAST){
+        }else if (communicationMode == CommunicationMode.UNICAST){
             int endOFTrans = this.clock + timeslot + getTimeOnAir();
             super.setClock(endOFTrans);
         }
     }
 
-    public void sendUnicastCommand(long endDeviceID){
-        beaconType = BeaconType.UNICAST;
-        calculateEnergyConsumptions(1);
-        System.out.println();
-        System.out.println("Sink sends a command beacon to end device with id " + endDeviceID);
-        clusterHead.receiveUnicastCommand(endDeviceID);
-    }
     public int getLatency(){ return latency;}
     public void setLatency(int latency){ this.latency = latency;}
     public void addLatency(int latency){ this.latency += latency;}

@@ -28,22 +28,29 @@ public class Channel {
         while (!priorityQueue.isEmpty()) {
             EndDevice endDevice = priorityQueue.poll(); // pairnei to proto kombo apo thn oura
 
+            System.out.println("The end device " + endDevice.getId() + " is using CAD mode to check for channel occupancy.");
             clock = (int) Math.ceil(endDevice.getCADduration());
+            endDevice.addLatency(clock);
 //            System.out.println("cad duration : " + clock);
+            endDevice.settReceive(clock);
 
             if (isFree()) { //an to kanali eleuthero
-                occupy(); //katelabe to
                 this.occupiedClockTimestamp = clock + endDevice.getInternalClock();
                 clock = occupiedClockTimestamp;
+                System.out.println(" The channel is not busy. The end device " + endDevice.getId() +
+                        " occupies the channel at "  + clock + " ms ");
+                occupy();
 
                 if(priorityQueue.peek() !=null) {
                     sendPreambleOfPacket(endDevice); // edw stelnei to preamble kai mexri na teleiwsei an ksekinisei na stelnei kapoios kombos kanei pisw xrono backoff
                     // otan bgei apo ayth th sunarthsh tha eimai se xrono tpreamble kai den exei staleii akoma to paketo
                     sendWholePacket(endDevice);
                 }else{
-                    clock = endDevice.getInternalClock() + endDevice.getTimeOnAir();
+                    clock += endDevice.getTimeOnAir();
                     endDevice.addLatency(clock - occupiedClockTimestamp);
-                    System.out.println(endDevice.getPacketToSend());
+                    endDevice.settTransmit(endDevice.getTimeOnAir());
+                    System.out.println(endDevice.getPacketToSend() + " transmission ends at " + clock);
+//                    endDevice.addLatency(clock);
                     this.isOccupied = false;
                 }
             }
@@ -59,35 +66,59 @@ public class Channel {
             // edw shmainei oti thelei na steilei allos kombos kai briskei katilimeno to kanali
             EndDevice deviceToUpdate = priorityQueue.poll();
 
+            System.out.println("The end device " + deviceToUpdate.getId() + " is using the CAD mode to check for channel occupancy.");
+
             int cadDuration = (int) Math.ceil(deviceToUpdate.getCADduration());
-            int backoff = 500 ;//this.backoff.nextInt(2000);
-            deviceToUpdate.setInternalClock(deviceToUpdate.getInternalClock()+backoff + cadDuration);
-            deviceToUpdate.addLatency(backoff + cadDuration);
+            int backoff = getRandomBackoff(deviceToUpdate);
+            deviceToUpdate.setInternalClock(deviceToUpdate.getInternalClock() +backoff + cadDuration);
+            deviceToUpdate.addLatency(backoff);
+            deviceToUpdate.addLatency(cadDuration);
+            deviceToUpdate.settReceive(cadDuration);
             priorityQueue.add(deviceToUpdate);
+            System.out.println("The channel is busy from node " + endDevice.getId() + " at time " + clock);
             System.out.println("node : " + deviceToUpdate.getId() + " -> backoff " + backoff);
             if(priorityQueue.peek()!=null) {
                 sendPreambleOfPacket(endDevice);
             }
         }
 //        else if(clock== occupiedClockTimestamp + tPreample){
-//            System.out.println("to preamble kommati stalthike");
+//            System.out.println("end of preamble");
 //        }
     }
+
+    public int getRandomBackoff(EndDevice endDevice){
+        if(endDevice.getSpreadingFactor()==12){
+            return 400 + this.backoff.nextInt(1601);
+        }else {
+            return this.backoff.nextInt(101);
+        }
+    }
     public void sendWholePacket(EndDevice endDevice){
+        int transmissionEnds = occupiedClockTimestamp + endDevice.getTimeOnAir();
         while (clock < priorityQueue.peek().getInternalClock() && clock < occupiedClockTimestamp + endDevice.getTimeOnAir()){
             clock ++ ;
         }
         if( clock == occupiedClockTimestamp + endDevice.getTimeOnAir()){
-            System.out.println(endDevice.getPacketToSend());
+            System.out.println(endDevice.getPacketToSend() + " transmission ends at " + clock);
             endDevice.addLatency(clock - occupiedClockTimestamp);
+            endDevice.settTransmit(endDevice.getTimeOnAir());
+//            endDevice.addLatency(clock);
             isOccupied = false;
         }else if(clock >= priorityQueue.peek().getInternalClock()){
             EndDevice colEndDevice = priorityQueue.poll();
+            System.out.println("The end device " + colEndDevice.getId() + " is using CAD mode to check for channel occupancy.");
+
             int cadDuration = (int) Math.ceil(colEndDevice.getCADduration());
             colEndDevice.addLatency(cadDuration);
-            System.out.println("the ed starts transmitting at time " + colEndDevice.getInternalClock() +
-                    " but the previous node occupy the channel at time " + clock);
-            System.out.println("collision! lost packet : " + colEndDevice.getPacketToSend() );
+            colEndDevice.addLatency(colEndDevice.getTimeOnAir());
+            colEndDevice.settReceive(cadDuration);
+            colEndDevice.settTransmit(colEndDevice.getTimeOnAir());
+            int transmissionTime = cadDuration + colEndDevice.getInternalClock();
+
+            System.out.println("the end device " + colEndDevice.getId() + " starts transmitting at time " + transmissionTime +
+                    " but end device " + endDevice.getId() + " occupied the channel at " + (clock + cadDuration) + " ms " +
+                    "and ended at " + transmissionEnds + " ms.");
+            System.out.println(" Collision detected! Packet from end device : " + colEndDevice.getId() + " lost." );
             lostPackets ++;
             if(priorityQueue.peek()!=null) {
                 sendWholePacket(endDevice);
@@ -96,7 +127,9 @@ public class Channel {
                     clock ++ ;
                 }
                 endDevice.addLatency(clock - occupiedClockTimestamp);
-                System.out.println(endDevice.getPacketToSend());
+                endDevice.settTransmit(endDevice.getTimeOnAir());
+//                endDevice.addLatency(clock);
+                System.out.println(endDevice.getPacketToSend() + " transmission ends at " + clock);
                 this.isOccupied = false;
             }
         }

@@ -8,6 +8,9 @@ public class EndDevice extends Node implements Comparable<EndDevice> {
     private Channel channel;
     private int lostPackets;
     private int latency ;
+    private int tTransmit;
+    private int tReceive;
+
 
     public EndDevice(long endDeviceID, LoraSettings loraSettings){
         super(endDeviceID,loraSettings);
@@ -18,15 +21,34 @@ public class EndDevice extends Node implements Comparable<EndDevice> {
         setClock(clock);
         lostPackets = 0 ;
         latency = 0 ;
+        this.tTransmit = 0;
+        this.tReceive = 0 ;
     }
     public void setSink(Sink sink){ this.sink = sink; }
 
-    public void receivePacket(int numOfNodes){
+    public void receiveBeacon(CommunicationMode communicationMode){
+        switch (communicationMode){
+            case LBT -> listenBeforeTalk();
+            case TDMA -> transmitInTimeslot();
+            case UNICAST -> transmitToTarget();
+        }
+    }
+
+    public void listenBeforeTalk(){
+        startTransmission();
+    }
+    public void transmitInTimeslot(){
         // compute the start of its time slot
-        int timeslot = (int) (wubArrivalTime + (getTimeOnAir() + GUARDTIME) * (super.getId() - 1 ));
+        int timeslot = (int) (wubArrivalTime + (getTimeOnAir() + GUARDTIME) * (super.getId() - 1));
         //System.out.println("timeslot start " + timeslot + " for end device " + this.getId());
         sendPacket(timeslot);
-        calculateEnergyConsumption(numOfNodes);
+        calculateEnergyConsumption();
+    }
+    public void transmitToTarget(){
+        // starts the transmission directly
+        int timeslot = wubArrivalTime;
+        sendPacket(timeslot);
+        calculateEnergyConsumption();
     }
 
     public void sendPacket(int timeslot){
@@ -38,7 +60,7 @@ public class EndDevice extends Node implements Comparable<EndDevice> {
         }
     }
 
-    public void calculateEnergyConsumption(int numOfNodes){
+    public void calculateEnergyConsumption(){
         resetEnergyConsumption();
 
         //sleep mode mode 3;
@@ -48,43 +70,29 @@ public class EndDevice extends Node implements Comparable<EndDevice> {
 
         //wake up receiver
         setMode(4);
+        // o xronos pou einai se receiving mode
+        this.tReceive = wubArrivalTime;
         addEnergyConsumption(calculateEnergyConsumptions(wubArrivalTime,mode));
-
 
         //transmiting mode
         if(packetToSend!=null){
             setMode(2);
-            addEnergyConsumption(calculateEnergyConsumptions(super.getTimeOnAir(),mode));
+            this.tTransmit = super.getTimeOnAir();
+            addEnergyConsumption(calculateEnergyConsumptions(tTransmit,mode));
+        }else {
+            this.tTransmit = 0 ;
         }
-    }
 
-    public void receiveUnicastBeacon(){
-        // starts the transmission directly
-        int timeslot = wubArrivalTime;
-        sendPacket(timeslot);
-
-        calculateEnergyConsumption(1);
     }
     public Packet getPacketToSend() { return packetToSend; }
     public void setPacketToSend(Packet packetToSend) { this.packetToSend = packetToSend; }
     public int getLostPackets(){ return lostPackets; }
     public Integer getInternalClock(){ return internalClock ; }
 
-    public void generateRandomTimeToSent() {
-        //den bazw sthn oura nodes ta opoia den exoun na metadosoyn paketa
+    public void startTransmission() {
         if(packetToSend != null){
-//            //tyxaia kathusterisi gia na mhn ksekinane ola ta nhmata mazi
-//            internalClock = clock;
-//            Random random = new Random();
-//            int r = random.nextInt(2000);
-//
-//            internalClock += r;
-            //prosteto to ed sto queue tou channel
-
-            // to bazw na kseikina molis kanei sensing
-           internalClock = clock;
-           internalClock += (int) getPacketToSend().getGeneratedTime();
-           channel.addEndDevice(this);
+            internalClock = clock + wubArrivalTime + (int) getPacketToSend().getGeneratedTime();
+            channel.addEndDevice(this);
         }else{
             System.out.println("node with id " + getId() + " has not packet to send.");
         }
@@ -108,5 +116,21 @@ public class EndDevice extends Node implements Comparable<EndDevice> {
     }
     public double getCADduration() { return loraSettings.cadDuration();}
 
+    public int gettTransmit() {
+        return tTransmit;
+    }
+
+    public int gettReceive() {
+        return tReceive;
+    }
+
+    public void settTransmit(int tTransmit) {
+        this.tTransmit = tTransmit;
+    }
+
+    public void settReceive(int tReceive) {
+        this.tReceive = tReceive;
+    }
+    public int getSpreadingFactor(){ return loraSettings.getSpreadingFactor();}
 
 }

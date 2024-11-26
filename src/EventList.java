@@ -117,17 +117,16 @@ public class EventList {
             lastPacketTime.put(i, 0L); // Αρχικά, δεν έχει δημιουργηθεί κανένα πακέτο
         }
 
-
         // Δημιουργία τυχαίων πακέτων από τους κόμβους
         for (int nodeId = 1; nodeId <= numberOfNodes && packetCount < totalPackets; nodeId++) {
             // Δημιουργία τυχαίου χρόνου εντός του τρέχοντος κύκλου
-            long randomTime = currentTime + (long) (Math.random() * 500 /* cycleDuration * 2*/ );
+            Random random = new Random();
+            long randomTime = currentTime + random.nextInt(cycleDuration);
             Packet packet = new Packet(nodeId, randomTime);
             lastPacketTime.put(nodeId,randomTime);
             eventQueue.add(packet);
             packetCount++;
         }
-
         // Προχωράμε στον χρόνο του επόμενου κύκλου
         currentTime += cycleDuration;
 
@@ -146,18 +145,16 @@ public class EventList {
             }
 
             // Αυξάνουμε τον τρέχοντα χρόνο (μπορείς να προσαρμόσεις αυτή τη λογική)
-            currentTime += cycleDuration; // ή μπορείς να χρησιμοποιήσεις μικρότερο βήμα, π.χ. 100 ms
+            currentTime += cycleDuration;
         }
     }
-
-
-
 
     // print all the packets from the event list
     public void printEventList() {
         while (!eventQueue.isEmpty()) {
             Packet packet = eventQueue.poll();
-            System.out.println(packet);
+//            System.out.println(packet);
+            System.out.println("The end device with ID " + packet.getEndDeviceID() + " generated a packet at " + packet.getGeneratedTime() + " ms.");
         }
     }
     public void addSequenceNumber() {

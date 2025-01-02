@@ -8,6 +8,7 @@ public class Sink extends Node{
     private int latency;
     private int totalPacketsReceived ;
     private CommunicationMode communicationMode;
+    private int requiredTimeslots;
 
     public Sink(long sinkID, LoraSettings loraSettings, ClusterHead clusterHead){
         super(sinkID, loraSettings);
@@ -17,7 +18,7 @@ public class Sink extends Node{
 
     public void sendWakeUpBeacon(CommunicationMode communicationMode, long endDeviceID){
         this.communicationMode = communicationMode;
-        if(communicationMode == CommunicationMode.TDMA || communicationMode == CommunicationMode.LBT){
+        if(communicationMode == CommunicationMode.TDMA){
             resetEnergyConsumption();
             System.out.println("Sink sends a broadcast command beacon to Cluster Head");
             numOfEds = clusterHead.getNumberOfEds();
@@ -30,49 +31,60 @@ public class Sink extends Node{
             }
             calculateEnergyConsumptions(1);
             System.out.println();
-            System.out.println("Sink sends a unicast command beacon to Cluster Head for the End Device with ID " + endDeviceID);
+            System.out.println("Sink sends a unicast command beacon to Cluster Head for the End Device with ID " + endDeviceID + " ( TimeOnAir = " + getTimeOnAir() + " ms)");
+        }else if( communicationMode == CommunicationMode.LBT){
+            latency = 0 ;
+            System.out.println("Sink sends a broadcast command beacon to Cluster Head ");
+            setClock(getTimeOnAir() + wubArrivalTime);
         }
         clusterHead.receiveWakeUpBeacon(communicationMode,endDeviceID);
     }
 
     public void calculateEnergyConsumptions(int numberOfEds){
         super.setMode(2); // transmitting mode
-        int timeOnAir = loraSettings.calculateTimeOnAir(2,1);
-//        System.out.println("beacon air time " + timeOnAir);
+        this.requiredTimeslots = super.getRequiredTimeslots() ;
 
-        addEnergyConsumption(calculateEnergyConsumptions(timeOnAir,mode));
-        setClock(timeOnAir);
+//        addEnergyConsumption(calculateEnergyConsumptions(wubDuration,mode));
+        addEnergyConsumption(calculateEnergyConsumptions(requiredTimeslots,mode));
+        setClock(requiredTimeslots);
 
-        //after timeOnAir * 2 + wubArrivalTime it changes to listening mode (mode 1)
         super.setMode(1);
-
-        int startListeningMode = clock + timeOnAir + wubArrivalTime;
+        int timeInListeningMode=0;
         if(communicationMode == CommunicationMode.TDMA) {
-            int endOfListeningMode = startListeningMode + (super.getTimeOnAir() + super.GUARDTIME) * numberOfEds;
-            addEnergyConsumption(calculateEnergyConsumptions(endOfListeningMode - startListeningMode, mode));
+            timeInListeningMode =  (calculateTimeslot()) * numberOfEds;
         }else if (communicationMode == CommunicationMode.UNICAST){
-            int endOfListeningMode = startListeningMode + super.getTimeOnAir();
-            addEnergyConsumption(calculateEnergyConsumptions(endOfListeningMode - startListeningMode, mode));
+            timeInListeningMode = calculateTimeslot();
         }
-        setClock(startListeningMode - wubArrivalTime);
+        addEnergyConsumption(calculateEnergyConsumptions(timeInListeningMode, mode));
     }
 
-    public void receivePacket(Packet packet, int timeslot,long endDeviceID) {
+    public void receivePacket(Packet packet, int slotStartTime,long endDeviceID) {
         if (packet != null) {
-            System.out.println("The node with id " + packet.getEndDeviceID() + " starts transmitting at " + timeslot + " ms.");
-            System.out.println(packet);
+            System.out.println("The node with id " + packet.getEndDeviceID() + " starts transmitting at  " + slotStartTime + " ms." +
+                    " End of transmission " + (slotStartTime + getTimeOnAir() + super.GUARDTIME) + " ms.");
+//            System.out.println(packet);
             receivedPackets.add(packet);
             totalPacketsReceived ++;
+        }else{
+            System.out.println("The node with id " + endDeviceID + " has no packet to transmit. ");
         }
         if(endDeviceID==numOfEds && communicationMode == CommunicationMode.TDMA){
             totalPacketsReceived = receivedPackets.size();
-            int endOFTrans = timeslot + getTimeOnAir() + GUARDTIME ;
-            super.addClock(endOFTrans);
+            addClock(this.requiredTimeslots); //ch transmission
+            int endOFTrans = clock + slotStartTime + calculateTimeslot();
+            super.setClock(endOFTrans);
             latency = super.getClock();
             receivedPackets.clear();
         }else if (communicationMode == CommunicationMode.UNICAST){
-            int endOFTrans = this.clock + timeslot + getTimeOnAir();
+            addClock(this.requiredTimeslots); //ch transmission
+            int endOFTrans = this.clock + slotStartTime + calculateTimeslot();
             super.setClock(endOFTrans);
+            addLatency(clock);
+        }else if (communicationMode == CommunicationMode.LBT && packet != null){
+            int endOFTrans =  slotStartTime + calculateTimeslot();
+            super.setClock(endOFTrans);
+            latency = super.getClock();
+            receivedPackets.clear();
         }
     }
 

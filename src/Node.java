@@ -8,6 +8,7 @@ public abstract class Node implements EnergyConsumption{
 
     //wubArrivalTime is the exact time when the end device was triggered by the cluster head
     protected int wubArrivalTime = 17; // ms
+    protected int wubDuration = 17; // ms //2 Bytes and data rate 1 kbps
 
     //modes:
     protected final int LISTENING_MODE = 1;
@@ -69,6 +70,17 @@ public abstract class Node implements EnergyConsumption{
 
     public int getTimeOnAir(){
         return loraSettings.getTimeOnAir();
+    }
+
+    public int calculateTimeslot(){
+        return getTimeOnAir() + GUARDTIME;
+    }
+    public int getRequiredTimeslots(){
+        int requiredTimeslots = calculateTimeslot();
+        while(requiredTimeslots<wubDuration){
+            requiredTimeslots += requiredTimeslots;
+        }
+        return requiredTimeslots ;
     }
 
 }

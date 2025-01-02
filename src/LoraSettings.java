@@ -43,17 +43,21 @@ public class LoraSettings {
             this.de=0;
         }
         double symbolRate; //Rsym
-        symbolRate = bandwidth * 1000/ Math.pow(2,spreadingFactor);
+        symbolRate = (bandwidth * 1000)/ Math.pow(2,spreadingFactor);
         double tPreamble = (preambleLength + 4.25) * 1 / symbolRate ;
 
         this.tPreamble = (int) Math.round(tPreamble * 1000);
+
 
         double temp = (double) (8 * payload - 4 * spreadingFactor + 28 + 16 * getErrorCorrectionBits() - 20 * packetHeader) / (4*(spreadingFactor-2*de));
         temp = Math.ceil(temp)* (getErrorCorrectionBits()+4);
         temp = Math.max(temp,0);
         double tPayload = (8 + temp) * 1 / symbolRate ;
         double timeOnAir = ((tPreamble + tPayload) * 1000);
+
         this.timeOnAir = (int) Math.round(timeOnAir);
+//        System.out.println("time on air " + timeOnAir);
+//        System.out.println("Preamble time " + this.tPreamble);
     }
 
     public int getTimeOnAir(){ return this.timeOnAir; }
@@ -116,6 +120,7 @@ public class LoraSettings {
 
         double tCADprocessing = (Math.pow(2,spreadingFactor) * spreadingFactor) / (1750 * Math.pow(10,3));
         this.cadDuration += tCADprocessing;
+//        System.out.println("CAD TIME : " + cadDuration);
 
         return cadDuration;
     }

@@ -7,70 +7,87 @@ public class Sink extends Node{
     private int numOfEds;
     private int latency;
     private int totalPacketsReceived ;
-    private BeaconType beaconType;
+    private CommunicationMode communicationMode;
+    private int requiredTimeslots;
 
     public Sink(long sinkID, LoraSettings loraSettings, ClusterHead clusterHead){
         super(sinkID, loraSettings);
         this.clusterHead = clusterHead;
         this.receivedPackets = new ArrayList<>();
     }
-    public void sendBroadcastCommand(int numberOfEds){
-        beaconType = BeaconType.BROADCAST;
-        resetEnergyConsumption();
-        this.numOfEds = numberOfEds;
-        latency = 0 ;
-        calculateEnergyConsumptions(numberOfEds);
-        clusterHead.receiveBroadcastCommand();
+
+    public void sendWakeUpBeacon(CommunicationMode communicationMode, long endDeviceID){
+        this.communicationMode = communicationMode;
+        if(communicationMode == CommunicationMode.TDMA){
+            resetEnergyConsumption();
+            System.out.println("Sink sends a broadcast command beacon to Cluster Head");
+            numOfEds = clusterHead.getNumberOfEds();
+            latency = 0;
+            calculateEnergyConsumptions(numOfEds);
+        }else if(communicationMode == CommunicationMode.UNICAST){
+            if(endDeviceID==1){
+                resetEnergyConsumption();
+                latency = 0 ;
+            }
+            calculateEnergyConsumptions(1);
+            System.out.println();
+            System.out.println("Sink sends a unicast command beacon to Cluster Head for the End Device with ID " + endDeviceID + " ( TimeOnAir = " + getTimeOnAir() + " ms)");
+        }else if( communicationMode == CommunicationMode.LBT){
+            latency = 0 ;
+            System.out.println("Sink sends a broadcast command beacon to Cluster Head ");
+            setClock(getTimeOnAir() + wubArrivalTime);
+        }
+        clusterHead.receiveWakeUpBeacon(communicationMode,endDeviceID);
     }
 
     public void calculateEnergyConsumptions(int numberOfEds){
         super.setMode(2); // transmitting mode
-        int timeOnAir = loraSettings.calculateTimeOnAir(2,1);
-//        System.out.println("beacon air time " + timeOnAir);
+        this.requiredTimeslots = super.getRequiredTimeslots() ;
 
-        addEnergyConsumption(calculateEnergyConsumptions(timeOnAir,mode));
-        setClock(timeOnAir);
+//        addEnergyConsumption(calculateEnergyConsumptions(wubDuration,mode));
+        addEnergyConsumption(calculateEnergyConsumptions(requiredTimeslots,mode));
+        setClock(requiredTimeslots);
 
-        //after timeOnAir * 2 + wubArrivalTime it changes to listening mode (mode 1)
         super.setMode(1);
-
-        int startListeningMode = clock + timeOnAir + wubArrivalTime;
-        if(beaconType == BeaconType.BROADCAST) {
-            int endOfListeningMode = startListeningMode + (super.getTimeOnAir() + super.GUARDTIME) * numberOfEds;
-            addEnergyConsumption(calculateEnergyConsumptions(endOfListeningMode - startListeningMode, mode));
-        }else if (beaconType == BeaconType.UNICAST){
-            int endOfListeningMode = startListeningMode + super.getTimeOnAir();
-            addEnergyConsumption(calculateEnergyConsumptions(endOfListeningMode - startListeningMode, mode));
+        int timeInListeningMode=0;
+        if(communicationMode == CommunicationMode.TDMA) {
+            timeInListeningMode =  (calculateTimeslot()) * numberOfEds;
+        }else if (communicationMode == CommunicationMode.UNICAST){
+            timeInListeningMode = calculateTimeslot();
         }
-        setClock(startListeningMode - wubArrivalTime);
+        addEnergyConsumption(calculateEnergyConsumptions(timeInListeningMode, mode));
     }
 
-    public void receivePacket(Packet packet, int timeslot,long endDeviceID) {
+    public void receivePacket(Packet packet, int slotStartTime,long endDeviceID) {
         if (packet != null) {
-            System.out.println("The node with id " + packet.getEndDeviceID() + " starts transmitting at " + timeslot + " ms.");
-            System.out.println(packet);
+            System.out.println("The node with id " + packet.getEndDeviceID() + " starts transmitting at  " + slotStartTime + " ms." +
+                    " End of transmission " + (slotStartTime + getTimeOnAir() + super.GUARDTIME) + " ms.");
+//            System.out.println(packet);
             receivedPackets.add(packet);
             totalPacketsReceived ++;
+        }else{
+            System.out.println("The node with id " + endDeviceID + " has no packet to transmit. ");
         }
-        if(endDeviceID==numOfEds && beaconType == BeaconType.BROADCAST){
+        if(endDeviceID==numOfEds && communicationMode == CommunicationMode.TDMA){
             totalPacketsReceived = receivedPackets.size();
-            int endOFTrans = timeslot + getTimeOnAir() + GUARDTIME ;
-            super.addClock(endOFTrans);
+            addClock(this.requiredTimeslots); //ch transmission
+            int endOFTrans = clock + slotStartTime + calculateTimeslot();
+            super.setClock(endOFTrans);
             latency = super.getClock();
             receivedPackets.clear();
-        }else if (beaconType == BeaconType.UNICAST){
-            int endOFTrans = this.clock + timeslot + getTimeOnAir();
+        }else if (communicationMode == CommunicationMode.UNICAST){
+            addClock(this.requiredTimeslots); //ch transmission
+            int endOFTrans = this.clock + slotStartTime + calculateTimeslot();
             super.setClock(endOFTrans);
+            addLatency(clock);
+        }else if (communicationMode == CommunicationMode.LBT && packet != null){
+            int endOFTrans =  slotStartTime + calculateTimeslot();
+            super.setClock(endOFTrans);
+            latency = super.getClock();
+            receivedPackets.clear();
         }
     }
 
-    public void sendUnicastCommand(long endDeviceID){
-        beaconType = BeaconType.UNICAST;
-        calculateEnergyConsumptions(1);
-        System.out.println();
-        System.out.println("Sink sends a command beacon to end device with id " + endDeviceID);
-        clusterHead.receiveUnicastCommand(endDeviceID);
-    }
     public int getLatency(){ return latency;}
     public void setLatency(int latency){ this.latency = latency;}
     public void addLatency(int latency){ this.latency += latency;}
